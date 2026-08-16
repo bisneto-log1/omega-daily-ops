@@ -101,6 +101,7 @@
     </div>
     <div class="clock-row">
       <div class="clock" id="clock">--:--:--</div>
+      <button class="gear-btn" id="notifBtn" title="Notificações">🔔</button>
       <button class="gear-btn" id="rotinaBtn" title="Rotina Fixa">⚙</button>
     </div>
   </div>
@@ -281,6 +282,10 @@ function render() {
       </div>
     </div>`;
   }).join('');
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    scheduleTodayNotifications();
+  }
 }
 
 function escapeHtml(str) {
@@ -390,6 +395,62 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 render();
+
+// ---- Notificações locais para os blocos da Rotina Fixa (somente hoje) ----
+const scheduledNotifIds = new Set();
+
+function updateNotifBtn() {
+  const btn = document.getElementById('notifBtn');
+  if (!('Notification' in window)) { btn.style.display = 'none'; return; }
+  if (Notification.permission === 'granted') {
+    btn.style.color = '#00e5a0';
+    btn.style.borderColor = 'rgba(0,229,160,0.5)';
+    btn.title = 'Notificações ativas';
+  } else {
+    btn.style.color = '#00d9ff';
+    btn.style.borderColor = 'rgba(0,217,255,0.3)';
+    btn.title = 'Ativar notificações';
+  }
+}
+
+function scheduleTodayNotifications() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const today = new Date();
+  if (dateKey(currentDate) !== dateKey(today)) return; // só agenda pro dia de hoje
+  const tasks = loadTasks(currentDate);
+  const now = Date.now();
+  tasks.filter(t => t.fixed && t.status === 'pending').forEach(t => {
+    const notifId = t.id;
+    if (scheduledNotifIds.has(notifId)) return;
+    const fireAt = timeToTimestamp(currentDate, t.time);
+    const delay = fireAt - now;
+    if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return; // só futuro próximo, dentro de 24h
+    scheduledNotifIds.add(notifId);
+    setTimeout(() => {
+      try {
+        new Notification('OMEGA // ' + t.time, { body: t.text, tag: notifId });
+      } catch (e) { /* silencioso: navegador pode bloquear notificação com app em foreground */ }
+    }, delay);
+  });
+}
+
+document.getElementById('notifBtn').addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    const perm = await Notification.requestPermission();
+    updateNotifBtn();
+    if (perm === 'granted') scheduleTodayNotifications();
+  } else if (Notification.permission === 'granted') {
+    new Notification('OMEGA', { body: 'Notificações já estão ativas para os blocos de hoje.' });
+  } else {
+    alert('Notificações foram bloqueadas nas configurações do navegador/app. Ative manualmente para receber os avisos dos blocos.');
+  }
+});
+
+updateNotifBtn();
+if ('Notification' in window && Notification.permission === 'granted') {
+  scheduleTodayNotifications();
+}
 
 // PWA install prompt
 let deferredPrompt;
